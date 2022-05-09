@@ -7,12 +7,13 @@ from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADER
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
 import albumentations as A
+from albumentations.pytorch import ToTensorV2
 import cv2
 
 
 def read_image(image_path):
     image = cv2.imread(str(image_path))
-    image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     return image
 
@@ -102,6 +103,41 @@ class SymbolDataset(Dataset):
         return source_image, positive_image, negative_image
 
 
+class SRDataset(Dataset):
+    def __init__(self, root_path):
+        self.root_path = Path(root_path)
+        self.images = list(self.root_path.glob('*.png'))
+        self.gt = self.root_path / 'GT.png'
+
+        self.transform = A.Compose([
+            A.Normalize(),
+            ToTensorV2()
+        ])
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        image_path = self.images[idx]
+
+        image = read_image(image_path)
+        gt = read_image(self.gt)
+
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+        gt = cv2.cvtColor(gt, cv2.COLOR_RGB2GRAY)
+
+        image = cv2.Canny(image, 100, 200)
+        gt = cv2.Canny(gt, 100, 200)
+
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        gt = cv2.cvtColor(gt, cv2.COLOR_GRAY2RGB)
+
+        image = self.transform(image=image)['image']
+        gt = self.transform(image=gt)['image']
+
+        return image_path.stem, gt, image
+
+
 class SymbolDataModule(pl.LightningDataModule):
     def __init__(self, data_dir, same_font=False):
         super().__init__()
@@ -115,16 +151,24 @@ class SymbolDataModule(pl.LightningDataModule):
                 A.Downscale(interpolation=cv2.INTER_LINEAR),
             ]),
             A.Sharpen(),
-            A.ImageCompression()
+            A.ImageCompression(),
+            A.Resize(64, 64),
+            A.Normalize(),
+            ToTensorV2()
         ])
         self.same_font = same_font
 
     def setup(self, stage: Optional[str] = None):
-        self.train_set = SymbolDataset(self.data_dir / 'train', transform=self.transform, same_font=self.same_font)
-        self.val_set = SymbolDataset(self.data_dir / 'valid', transform=self.transform, same_font=self.same_font)
+        self.train_set = SymbolDataset(self.data_dir / 'fannet' / 'train', transform=self.transform, same_font=self.same_font)
+        self.val_set = SymbolDataset(self.data_dir / 'fannet' / 'valid', transform=self.transform, same_font=self.same_font)
+        self.sr_set = SRDataset(self.data_dir / 'sr-test')
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return DataLoader(self.train_set, batch_size=64, shuffle=True, num_workers=4)
+        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=8)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(self.val_set, batch_size=64)
+        return DataLoader(self.val_set, batch_size=256, num_workers=8)
+        # return [
+        #     DataLoader(self.val_set, batch_size=256, num_workers=8),
+        #     DataLoader(self.sr_set, batch_size=1, num_workers=2)
+        # ]
