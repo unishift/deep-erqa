@@ -3,6 +3,8 @@ from itertools import chain
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
+import torch
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 from torch.utils.data import Dataset, DataLoader
 import pytorch_lightning as pl
@@ -24,6 +26,57 @@ def read_image(image_path, canny=False):
 
     return image
 
+
+def randomly_merge(img1, img2):
+    img = img1.clone()
+
+    *_, h, w = img.shape
+    rng_index = random.randint(0, 3)
+    if rng_index == 0:
+        left, right = 0, w
+        top, bottom = 0, h // 2
+    elif rng_index == 1:
+        left, right = 0, w
+        top, bottom = h // 2, h
+    elif rng_index == 2:
+        left, right = 0, w // 2
+        top, bottom = 0, h
+    elif rng_index == 3:
+        left, right = w // 2, w
+        top, bottom = 0, h
+    else:
+        left, right = 0, w
+        top, bottom = 0, h
+
+    img[..., top:bottom, left:right] = img2[..., top:bottom, left:right]
+    mask = torch.ones_like(img)[0]
+    mask[top:bottom, left:right] = 0
+
+    return img, mask
+
+
+def random_blend(img1, img2):
+    transform = A.CoarseDropout(max_width=32, max_height=32, min_width=4, min_height=4, min_holes=1)
+    *_, h, w = img1.shape
+
+    rng_index = random.randint(0, 1)
+    if rng_index == 0:
+        img = img1.copy()
+        to_copy = img2
+        fill_value = 1
+    elif rng_index == 1:
+        img = img2.copy()
+        to_copy = img1
+        fill_value = 0
+
+    holes = transform.get_params_dependent_on_targets({'image': img})['holes']
+    mask = np.full_like(img, 1 - fill_value)[..., 0]
+
+    for x1, y1, x2, y2 in holes:
+        img[y1:y2, x1:x2] = to_copy[y1:y2, x1:x2]
+        mask[y1:y2, x1:x2] = fill_value
+
+    return img, mask
 
 class SymbolDataset(Dataset):
     SYMBOLS = tuple([
@@ -103,12 +156,18 @@ class SymbolDataset(Dataset):
         if self.positive_transform is not None:
             positive_image = self.positive_transform(image=positive_image)['image']
 
+        semi_image, mask = random_blend(positive_image, negative_image)
+
         if self.transform is not None:
             source_image = self.transform(image=source_image)['image']
             positive_image = self.transform(image=positive_image)['image']
             negative_image = self.transform(image=negative_image)['image']
+            semi_image = self.transform(image=semi_image)['image']
 
-        return source_image, positive_image, negative_image
+            mask = torch.from_numpy(mask).float()
+
+        # semi_image, mask = randomly_merge(positive_image, negative_image)
+        return source_image, positive_image, negative_image, semi_image, mask
 
 
 class SRDataset(Dataset):
@@ -152,7 +211,7 @@ class SymbolDataModule(pl.LightningDataModule):
 
         self.data_dir = Path(data_dir)
         self.transform = A.Compose([
-            A.CoarseDropout(max_height=16, max_width=16),
+            # A.CoarseDropout(max_height=16, max_width=16),
             A.RandomBrightnessContrast(brightness_by_max=False),
             A.OneOf([
                 A.GaussNoise(var_limit=(10, 20)),

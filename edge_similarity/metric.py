@@ -77,8 +77,8 @@ class EdgeMetric(pl.LightningModule):
     def loss_func(self, y_pred, y_true):
         return F.binary_cross_entropy(y_pred, y_true)
 
-    def log_heatmaps(self, src, pos, neg, pos_res, neg_res, tag):
-        fig, axes = plt.subplots(nrows=5, ncols=5)
+    def log_heatmaps(self, src, pos, neg, semi, pos_res, neg_res, semi_res, mask, tag):
+        fig, axes = plt.subplots(nrows=5, ncols=8)
         for i, ax in enumerate(axes):
             for a in ax:
                 a.axis('off')
@@ -88,38 +88,47 @@ class EdgeMetric(pl.LightningModule):
             ax[2].imshow(pos_res[i].cpu().detach()[0], vmin=0, vmax=1)
             ax[3].imshow(neg[i].cpu().detach()[0], cmap='gray')
             ax[4].imshow(neg_res[i].cpu().detach()[0], vmin=0, vmax=1)
+            ax[5].imshow(semi[i].cpu().detach()[0], cmap='gray')
+            ax[6].imshow(semi_res[i].cpu().detach()[0], vmin=0, vmax=1)
+            ax[7].imshow(mask[i].cpu().detach(), vmin=0, vmax=1)
 
         axes[0][0].set_title('Source')
         axes[0][1].set_title('Positive')
         axes[0][2].set_title('Pos Heatmap')
         axes[0][3].set_title('Negative')
         axes[0][4].set_title('Neg Heatmap')
+        axes[0][5].set_title('Semi')
+        axes[0][6].set_title('Semi Heatmap')
+        axes[0][7].set_title('Mask')
 
         self.logger.experiment.add_figure(tag, fig, self.current_epoch)
 
     def base_step(self, batch, batch_idx, stage):
-        src, pos, neg = batch
+        src, pos, neg, semi, mask = batch
+
+        mask = mask[:, ::4, ::4]
 
         pos_res = self(src, pos, return_heatmap=True)
         neg_res = self(src, neg, return_heatmap=True)
+        semi_res = self(src, semi, return_heatmap=True)
 
-        pos_value = self.aggregate(pos_res)
-        neg_value = self.aggregate(neg_res)
-
-        pos_labels = torch.zeros(len(src), dtype=src.dtype, device=src.device)
-        pos_loss = self.loss_func(pos_value.squeeze(1), pos_labels)
-        neg_loss = self.loss_func(neg_value.squeeze(1), 1 - pos_labels)
-        loss = (pos_loss + neg_loss) / 2
+        pos_loss = self.loss_func(pos_res.squeeze(1), torch.zeros_like(mask))
+        neg_loss = self.loss_func(neg_res.squeeze(1), torch.ones_like(mask))
+        semi_loss = self.loss_func(semi_res.squeeze(1), mask)
+        # loss = (pos_loss + neg_loss + semi_loss) / 3
+        loss = semi_loss
 
         self.log(f'{stage}/PosLoss', pos_loss)
         self.log(f'{stage}/NegLoss', neg_loss)
+        self.log(f'{stage}/SemiLoss', neg_loss)
         self.log(f'{stage}/Loss', loss, prog_bar=True)
 
-        self.log(f'{stage}/PosValue', pos_value.mean())
-        self.log(f'{stage}/NegValue', neg_value.mean())
+        self.log(f'{stage}/PosValue', pos_res.mean())
+        self.log(f'{stage}/NegValue', neg_res.mean())
+        self.log(f'{stage}/SemiValue', semi_res.mean())
 
         if batch_idx == 0:
-            self.log_heatmaps(src, pos, neg, pos_res, neg_res, f'{stage}/Grid')
+            self.log_heatmaps(src, pos, neg, semi, pos_res, neg_res, semi_res, mask, f'{stage}/Grid')
 
         return loss
 

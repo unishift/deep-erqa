@@ -20,6 +20,7 @@ def parse_args():
     parser.add_argument('--canny', action='store_true')
 
     parser.add_argument('--logdir', default='/home/experiments/tb_logdir')
+    parser.add_argument('--exp-name', default=None)
 
     parser.add_argument('dataset_path', type=Path)
 
@@ -39,11 +40,11 @@ def main():
     })
 
     datamodule = SymbolDataModule(args.dataset_path, canny=args.canny)
-    logger = TensorBoardLogger(args.logdir, name="EdgeMetric")
+    logger = TensorBoardLogger(args.logdir, name="EdgeMetric", version=args.exp_name)
     trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=1, auto_lr_find=True)
 
     model = EdgeMetric(args.backbone, args.lr, agg=args.agg)
-    # trainer.tune(model, datamodule=datamodule)
+    trainer.tune(model, datamodule=datamodule)
     trainer.fit(model, datamodule=datamodule)
 
     metrics = trainer.validate(model, datamodule=datamodule)
