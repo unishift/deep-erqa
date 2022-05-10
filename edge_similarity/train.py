@@ -16,8 +16,9 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=0.001)
     parser.add_argument('--backbone', default='d0')
     parser.add_argument('--epochs', type=int, default=10)
+    parser.add_argument('--agg', choices=('max', 'mean'), default='max')
 
-    parser.add_argument('--logdir', default='/home/restoration-metric/tb_logdir')
+    parser.add_argument('--logdir', default='/home/experiments/tb_logdir')
 
     parser.add_argument('dataset_path', type=Path)
 
@@ -27,13 +28,19 @@ def parse_args():
 def main():
     args = parse_args()
 
+    mlflow.set_tracking_uri("http://localhost:5000")
     mlflow.pytorch.autolog()
+
+    mlflow.log_params({
+        'backbone': args.backbone,
+    })
 
     datamodule = SymbolDataModule(args.dataset_path)
     logger = TensorBoardLogger(args.logdir, name="EdgeMetric")
-    trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=1)
+    trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=1, auto_lr_find=True)
 
-    model = EdgeMetric(args.backbone, args.lr)
+    model = EdgeMetric(args.backbone, args.lr, agg=args.agg)
+    # trainer.tune(model, datamodule=datamodule)
     trainer.fit(model, datamodule=datamodule)
 
     metrics = trainer.validate(model, datamodule=datamodule)

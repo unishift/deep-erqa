@@ -10,7 +10,7 @@ from effdet.efficientdet import *
 
 
 class EdgeMetric(pl.LightningModule):
-    def __init__(self, backbone='d0', lr=0.001):
+    def __init__(self, backbone='d0', lr=0.001, agg='max'):
         super().__init__()
         self.save_hyperparameters()
 
@@ -31,7 +31,10 @@ class EdgeMetric(pl.LightningModule):
             fi['num_chs'] *= 2
         self.fpn = BiFpn(self.config, feature_info)
         self.class_net = nn.Sequential(
-            SeparableConv2d(in_channels=config.fpn_channels, out_channels=config.num_classes, padding='same', bias=True, norm_layer=None, act_layer=None),
+            SeparableConv2d(in_channels=config.fpn_channels, out_channels=config.fpn_channels, padding='same'),
+            SeparableConv2d(in_channels=config.fpn_channels, out_channels=config.fpn_channels, padding='same'),
+            SeparableConv2d(in_channels=config.fpn_channels, out_channels=config.num_classes, padding='same', bias=True,
+                            norm_layer=None, act_layer=None),
         )
 
         for n, m in self.named_modules():
@@ -40,6 +43,14 @@ class EdgeMetric(pl.LightningModule):
                     _init_weight_alt(m, n)
                 else:
                     _init_weight(m, n)
+
+    def aggregate(self, x):
+        if self.hparams.agg == 'max':
+            return torch.amax(x, dim=(-1, -2))
+        elif self.hparams.agg == 'mean':
+            return torch.mean(x, dim=(-1, -2))
+        else:
+            raise NotImplementedError(f'Aggregation "{self.hparams.agg}" not implemented')
 
     def forward(self, ref, tgt, return_heatmap=False):
         ref = self.backbone(ref)
@@ -53,47 +64,17 @@ class EdgeMetric(pl.LightningModule):
         if return_heatmap:
             return pred
         else:
-            return torch.amax(pred, dim=(-1, -2))
+            return self.aggregate(pred)
 
     def configure_optimizers(self):
         return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
 
-    def training_step(self, batch, batch_idx):
-        src, pos, neg = batch
+    def loss_func(self, y_pred, y_true):
+        return F.binary_cross_entropy_with_logits(y_pred, y_true)
 
-        pos_res = self(src, pos)
-        neg_res = self(src, neg)
-
-        pos_labels = torch.zeros(len(src), dtype=src.dtype, device=src.device)
-        pos_loss = F.binary_cross_entropy_with_logits(pos_res.squeeze(1), pos_labels)
-        neg_loss = F.binary_cross_entropy_with_logits(neg_res.squeeze(1), 1 - pos_labels)
-        loss = (pos_loss + neg_loss) / 2
-
-        self.log('Train/PosLoss', pos_loss)
-        self.log('Train/NegLoss', neg_loss)
-        self.log('Train/Loss', loss)
-
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        src, pos, neg = batch
-
-        pos_res = self(src, pos, return_heatmap=True)
-        neg_res = self(src, neg, return_heatmap=True)
-
-        pos_value = torch.amax(pos_res, dim=(-1, -2))
-        neg_value = torch.amax(neg_res, dim=(-1, -2))
-
-        pos_labels = torch.zeros(len(src), dtype=src.dtype, device=src.device)
-        pos_loss = F.binary_cross_entropy_with_logits(pos_value.squeeze(1), pos_labels)
-        neg_loss = F.binary_cross_entropy_with_logits(neg_value.squeeze(1), 1 - pos_labels)
-        loss = (pos_loss + neg_loss) / 2
-
-        self.log('Val/PosLoss', pos_loss)
-        self.log('Val/NegLoss', neg_loss)
-        self.log('Val/Loss', loss)
-
+    def log_heatmaps(self, src, pos, neg, pos_res, neg_res, tag):
         fig, axes = plt.subplots(nrows=5, ncols=5)
+        plt.axis('off')
         for i, ax in enumerate(axes):
             ax[0].imshow(src[i].cpu().detach()[0])
             ax[1].imshow(pos[i].cpu().detach()[0])
@@ -101,6 +82,45 @@ class EdgeMetric(pl.LightningModule):
             ax[3].imshow(neg[i].cpu().detach()[0])
             ax[4].imshow(neg_res[i].cpu().detach()[0])
 
+        axes[0][0].set_title('Source')
+        axes[0][2].set_title('Positive')
+        axes[0][0].set_title('Pos Heatmap')
+        axes[0][0].set_title('Negative')
+        axes[0][0].set_title('Neg Heatmap')
+
+        self.logger.experiment.add_figure(tag, fig, self.current_epoch)
+
+    def base_step(self, batch, batch_idx, stage):
+        src, pos, neg = batch
+
+        pos_res = self(src, pos, return_heatmap=True)
+        neg_res = self(src, neg, return_heatmap=True)
+
+        pos_value = self.aggregate(pos_res)
+        neg_value = self.aggregate(neg_res)
+
+        pos_labels = torch.zeros(len(src), dtype=src.dtype, device=src.device)
+        pos_loss = self.loss_func(pos_value.squeeze(1), pos_labels)
+        neg_loss = self.loss_func(neg_value.squeeze(1), 1 - pos_labels)
+        loss = (pos_loss + neg_loss) / 2
+
+        self.log(f'{stage}/PosLoss', pos_loss)
+        self.log(f'{stage}/NegLoss', neg_loss)
+        self.log(f'{stage}/Loss', loss)
+
+        self.log(f'{stage}/PosValue', pos_value.mean())
+        self.log(f'{stage}/NegValue', neg_value.mean())
+
+        if batch_idx == 0:
+            self.log_heatmaps(src, pos, neg, pos_res, neg_res, f'{stage}/Grid')
+
+        return loss
+
+    def training_step(self, batch, batch_idx):
+        return self.base_step(batch, batch_idx, 'Train')
+
+    def validation_step(self, batch, batch_idx):
+        self.base_step(batch, batch_idx, 'Val')
 
         # if dataloader_idx == 0:
         #     self.training_step(batch, batch_idx)
