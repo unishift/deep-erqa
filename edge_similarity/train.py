@@ -33,6 +33,7 @@ def main():
 
     mlflow.log_params({
         'backbone': args.backbone,
+        'agg': args.agg
     })
 
     datamodule = SymbolDataModule(args.dataset_path)

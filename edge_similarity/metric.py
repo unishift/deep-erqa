@@ -26,6 +26,8 @@ class EdgeMetric(pl.LightningModule):
             config.backbone_name, features_only=True,
             out_indices=self.config.backbone_indices or (2, 3, 4),
             pretrained=pretrained_backbone, **config.backbone_args)
+        self.backbone.requires_grad_(False)
+
         feature_info = get_feature_info(self.backbone)
         for fi in feature_info:
             fi['num_chs'] *= 2
@@ -35,6 +37,7 @@ class EdgeMetric(pl.LightningModule):
             SeparableConv2d(in_channels=config.fpn_channels, out_channels=config.fpn_channels, padding='same'),
             SeparableConv2d(in_channels=config.fpn_channels, out_channels=config.num_classes, padding='same', bias=True,
                             norm_layer=None, act_layer=None),
+            nn.Sigmoid()
         )
 
         for n, m in self.named_modules():
@@ -70,23 +73,25 @@ class EdgeMetric(pl.LightningModule):
         return torch.optim.AdamW(self.parameters(), lr=self.hparams.lr)
 
     def loss_func(self, y_pred, y_true):
-        return F.binary_cross_entropy_with_logits(y_pred, y_true)
+        return F.binary_cross_entropy(y_pred, y_true)
 
     def log_heatmaps(self, src, pos, neg, pos_res, neg_res, tag):
         fig, axes = plt.subplots(nrows=5, ncols=5)
-        plt.axis('off')
         for i, ax in enumerate(axes):
-            ax[0].imshow(src[i].cpu().detach()[0])
-            ax[1].imshow(pos[i].cpu().detach()[0])
-            ax[2].imshow(pos_res[i].cpu().detach()[0])
-            ax[3].imshow(neg[i].cpu().detach()[0])
-            ax[4].imshow(neg_res[i].cpu().detach()[0])
+            for a in ax:
+                a.axis('off')
+
+            ax[0].imshow(src[i].cpu().detach()[0], cmap='gray')
+            ax[1].imshow(pos[i].cpu().detach()[0], cmap='gray')
+            ax[2].imshow(pos_res[i].cpu().detach()[0], vmin=0, vmax=1)
+            ax[3].imshow(neg[i].cpu().detach()[0], cmap='gray')
+            ax[4].imshow(neg_res[i].cpu().detach()[0], vmin=0, vmax=1)
 
         axes[0][0].set_title('Source')
-        axes[0][2].set_title('Positive')
-        axes[0][0].set_title('Pos Heatmap')
-        axes[0][0].set_title('Negative')
-        axes[0][0].set_title('Neg Heatmap')
+        axes[0][1].set_title('Positive')
+        axes[0][2].set_title('Pos Heatmap')
+        axes[0][3].set_title('Negative')
+        axes[0][4].set_title('Neg Heatmap')
 
         self.logger.experiment.add_figure(tag, fig, self.current_epoch)
 
@@ -106,7 +111,7 @@ class EdgeMetric(pl.LightningModule):
 
         self.log(f'{stage}/PosLoss', pos_loss)
         self.log(f'{stage}/NegLoss', neg_loss)
-        self.log(f'{stage}/Loss', loss)
+        self.log(f'{stage}/Loss', loss, prog_bar=True)
 
         self.log(f'{stage}/PosValue', pos_value.mean())
         self.log(f'{stage}/NegValue', neg_value.mean())
