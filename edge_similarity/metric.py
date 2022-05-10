@@ -10,13 +10,15 @@ from effdet.efficientdet import *
 
 
 class EdgeMetric(pl.LightningModule):
-    def __init__(self, backbone='d0', lr=0.001, agg='max'):
+    def __init__(self, backbone='d0', lr=0.001, agg='mean'):
         super().__init__()
         self.save_hyperparameters()
 
         config = get_efficientdet_config(f'tf_efficientdet_{backbone}')
         config.image_size = [64, 64]
         config.num_classes = 1
+        config.min_level = 2
+        config.num_levels = 6
         pretrained_backbone = True
         alternate_init = False
 
@@ -24,7 +26,7 @@ class EdgeMetric(pl.LightningModule):
         set_config_readonly(self.config)
         self.backbone = create_model(
             config.backbone_name, features_only=True,
-            out_indices=self.config.backbone_indices or (2, 3, 4),
+            out_indices=self.config.backbone_indices or (1, 2, 3, 4),
             pretrained=pretrained_backbone, **config.backbone_args)
         self.backbone.requires_grad_(False)
 

@@ -11,9 +11,16 @@ from albumentations.pytorch import ToTensorV2
 import cv2
 
 
-def read_image(image_path):
+def read_image(image_path, canny=False):
     image = cv2.imread(str(image_path))
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+    if canny:
+        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+
+        image = cv2.Canny(image, 100, 200)
+
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
     return image
 
@@ -33,7 +40,7 @@ class SymbolDataset(Dataset):
         path = Path(path)
         return chr(int(path.stem))
 
-    def __init__(self, root_path, transform=None, same_font=False):
+    def __init__(self, root_path, transform=None, same_font=False, canny=False):
         self.root_path = Path(root_path)
         self.fonts = {
             font_path.name: {
@@ -55,7 +62,7 @@ class SymbolDataset(Dataset):
                 A.HorizontalFlip(),
                 A.VerticalFlip(),
                 A.Rotate(value=0),
-                A.RandomResizedCrop(32, 32),
+                A.RandomSizedCrop((8, 32), 64, 64),
             ],
             additional_targets={
                 'image1': 'image'
@@ -67,6 +74,7 @@ class SymbolDataset(Dataset):
 
         self.transform = transform
         self.same_font = same_font
+        self.canny = canny
 
     def __len__(self):
         return len(self.all_images)
@@ -74,17 +82,17 @@ class SymbolDataset(Dataset):
     def __getitem__(self, idx):
         source_image_path = self.all_images[idx]
 
-        source_image = read_image(source_image_path)
+        source_image = read_image(source_image_path, canny=self.canny)
         source_ch = self.char_from_path(source_image_path)
 
         if self.same_font:
             same_sym = self.symbols[source_ch]
-            positive_image = read_image(random.choice(same_sym))
+            positive_image = read_image(random.choice(same_sym), canny=self.canny)
         else:
             positive_image = source_image
 
         diff_sym = list(chain(*(self.symbols[ch] for ch in self.SYMBOLS if ch != source_ch)))
-        negative_image = read_image(random.choice(diff_sym))
+        negative_image = read_image(random.choice(diff_sym), canny=self.canny)
 
         if self.source_transform is not None:
             transform_res = self.source_transform(image=source_image, image1=positive_image)
@@ -139,11 +147,12 @@ class SRDataset(Dataset):
 
 
 class SymbolDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, same_font=False):
+    def __init__(self, data_dir, same_font=False, canny=False):
         super().__init__()
 
         self.data_dir = Path(data_dir)
         self.transform = A.Compose([
+            A.CoarseDropout(max_height=16, max_width=16),
             A.RandomBrightnessContrast(brightness_by_max=False),
             A.OneOf([
                 A.GaussNoise(var_limit=(10, 20)),
@@ -152,15 +161,21 @@ class SymbolDataModule(pl.LightningDataModule):
             ]),
             A.Sharpen(),
             A.ImageCompression(),
-            A.Resize(64, 64),
             A.Normalize(),
             ToTensorV2()
         ])
         self.same_font = same_font
+        self.canny = canny
 
     def setup(self, stage: Optional[str] = None):
-        self.train_set = SymbolDataset(self.data_dir / 'fannet' / 'train', transform=self.transform, same_font=self.same_font)
-        self.val_set = SymbolDataset(self.data_dir / 'fannet' / 'valid', transform=self.transform, same_font=self.same_font)
+        self.train_set = SymbolDataset(
+            self.data_dir / 'fannet' / 'train',
+            transform=self.transform, same_font=self.same_font, canny=self.canny
+        )
+        self.val_set = SymbolDataset(
+            self.data_dir / 'fannet' / 'valid',
+            transform=self.transform, same_font=self.same_font, canny=self.canny
+        )
         self.sr_set = SRDataset(self.data_dir / 'sr-test')
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
