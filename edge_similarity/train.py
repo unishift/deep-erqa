@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument('--epochs', type=int, default=10)
     parser.add_argument('--agg', choices=('max', 'mean'), default='max')
     parser.add_argument('--canny', action='store_true')
+    parser.add_argument('--unmask-zeros', action='store_true')
 
     parser.add_argument('--logdir', default='/home/experiments/tb_logdir')
     parser.add_argument('--exp-name', default=None)
@@ -37,10 +38,11 @@ def main():
     mlflow.log_params({
         'backbone': args.backbone,
         'agg': args.agg,
-        'canny': args.canny
+        'canny': args.canny,
+        'unmask_zeros': args.unmask_zeros
     })
 
-    datamodule = SymbolDataModule(args.dataset_path, canny=args.canny)
+    datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros)
     logger = TensorBoardLogger(args.logdir, name="EdgeMetric", version=args.exp_name)
     trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=1, auto_lr_find=True)
 

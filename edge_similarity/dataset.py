@@ -55,9 +55,9 @@ def randomly_merge(img1, img2):
     return img, mask
 
 
-def random_blend(img1, img2):
+def random_blend(img1, img2, unmask_zeros=False):
     transform = A.CoarseDropout(max_width=32, max_height=32, min_width=4, min_height=4, min_holes=1)
-    *_, h, w = img1.shape
+    *_, h, w, ch = img1.shape
 
     rng_index = random.randint(0, 1)
     if rng_index == 0:
@@ -76,7 +76,11 @@ def random_blend(img1, img2):
         img[y1:y2, x1:x2] = to_copy[y1:y2, x1:x2]
         mask[y1:y2, x1:x2] = fill_value
 
+    if unmask_zeros:
+        mask[(img[..., 0] == img1[..., 0]) & (img[..., 0] == 0)] = 0
+
     return img, mask
+
 
 class SymbolDataset(Dataset):
     SYMBOLS = tuple([
@@ -93,7 +97,7 @@ class SymbolDataset(Dataset):
         path = Path(path)
         return chr(int(path.stem))
 
-    def __init__(self, root_path, transform=None, same_font=False, canny=False):
+    def __init__(self, root_path, transform=None, same_font=False, canny=False, unmask_zeros=False):
         self.root_path = Path(root_path)
         self.fonts = {
             font_path.name: {
@@ -128,6 +132,7 @@ class SymbolDataset(Dataset):
         self.transform = transform
         self.same_font = same_font
         self.canny = canny
+        self.unmask_zeros = unmask_zeros
 
     def __len__(self):
         return len(self.all_images)
@@ -156,7 +161,7 @@ class SymbolDataset(Dataset):
         if self.positive_transform is not None:
             positive_image = self.positive_transform(image=positive_image)['image']
 
-        semi_image, mask = random_blend(positive_image, negative_image)
+        semi_image, mask = random_blend(positive_image, negative_image, self.unmask_zeros)
 
         if self.transform is not None:
             source_image = self.transform(image=source_image)['image']
@@ -206,7 +211,7 @@ class SRDataset(Dataset):
 
 
 class SymbolDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, same_font=False, canny=False):
+    def __init__(self, data_dir, same_font=False, canny=False, unmask_zeros=False):
         super().__init__()
 
         self.data_dir = Path(data_dir)
@@ -225,23 +230,24 @@ class SymbolDataModule(pl.LightningDataModule):
         ])
         self.same_font = same_font
         self.canny = canny
+        self.unmask_zeros = unmask_zeros
 
     def setup(self, stage: Optional[str] = None):
         self.train_set = SymbolDataset(
             self.data_dir / 'fannet' / 'train',
-            transform=self.transform, same_font=self.same_font, canny=self.canny
+            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros
         )
         self.val_set = SymbolDataset(
             self.data_dir / 'fannet' / 'valid',
-            transform=self.transform, same_font=self.same_font, canny=self.canny
+            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros
         )
         self.sr_set = SRDataset(self.data_dir / 'sr-test')
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=8)
+        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=16)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(self.val_set, batch_size=256, num_workers=8)
+        return DataLoader(self.val_set, batch_size=256, num_workers=16)
         # return [
         #     DataLoader(self.val_set, batch_size=256, num_workers=8),
         #     DataLoader(self.sr_set, batch_size=1, num_workers=2)
