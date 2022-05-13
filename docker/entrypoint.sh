@@ -1,4 +1,5 @@
-nohup tensorboard --logdir /home/restoration-metric/tb_logdir --port=7792 --host 0.0.0.0 > /home/tb_log 2>&1 &
-nohup jupyter-lab --port 7791 --NotebookApp.token='token' --ip=0.0.0.0 --notebook-dir /home > /home/jup_log 2>&1 &
+tmux new -d -s jupyter jupyter-lab --port 7791 --NotebookApp.token='token' --ip=0.0.0.0 --notebook-dir /home
+tmux new -d -s tensorboard tensorboard --logdir /home/experiments/tb_logdir --port=7792 --host 0.0.0.0
+tmux new -d -s mlflow mlflow server --backend-store-uri sqlite:////home/experiments/mlflow.db --default-artifact-root /home/experiments/artifacts --host 0.0.0.0
 
 zsh

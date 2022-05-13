@@ -12,7 +12,9 @@ RUN apt-get update && \
 
 RUN python -m pip install -U pip && \
     pip install -U setuptools wheel && \
-    pip install jupyterlab ipywidgets pytorch-lightning mlflow tensorboard albumentations torchvision tqdm opencv-python
+    pip install jupyterlab ipywidgets pytorch-lightning mlflow tensorboard albumentations torchvision tqdm opencv-python \
+
+RUN pip install -U matplotlib torch torchvision effdet
 
 ENV PATH="/usr/local/cuda/bin:${PATH}"
 ENV LD_LIBRARY_PATH="/usr/local/cuda/lib64:${LD_LIBRARY_PATH}"
