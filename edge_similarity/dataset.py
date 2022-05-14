@@ -68,24 +68,21 @@ def random_blend(img1, img2, unmask_zeros=False):
     rng_index = random.randint(0, 1)
     if rng_index == 0:
         img = img1.copy()
-        to_copy = img2
         fill_value = 1
     elif rng_index == 1:
         img = img2.copy()
-        to_copy = img1
         fill_value = 0
 
-    holes = transform.get_params_dependent_on_targets({'image': img})['holes']
-    mask = np.full_like(img, 1 - fill_value)[..., 0]
+    holes = transform.get_params_dependent_on_targets({'image': img1})['holes']
+    mask = np.full_like(img1, 1 - fill_value)[..., 0]
 
     for x1, y1, x2, y2 in holes:
-        img[y1:y2, x1:x2] = to_copy[y1:y2, x1:x2]
         mask[y1:y2, x1:x2] = fill_value
 
     if unmask_zeros:
-        mask[(img[..., 0] == img1[..., 0]) & (img[..., 0] == 0)] = 0
+        mask[(img2[..., 0] == img1[..., 0]) & (img1[..., 0] == 0)] = 0
 
-    return img, mask
+    return mask
 
 
 class SymbolDataset(Dataset):
@@ -147,9 +144,6 @@ class SymbolDataset(Dataset):
             A.ImageCompression()
         ]
 
-        if canny:
-            degradation_transform.append(A.Lambda(image=run_canny))
-
         self.degradation_transform = A.Compose(degradation_transform)
 
         self.transform = transform
@@ -190,7 +184,16 @@ class SymbolDataset(Dataset):
             positive_image = self.degradation_transform(image=positive_image)['image']
             negative_image = self.degradation_transform(image=negative_image)['image']
 
-        semi_image, mask = random_blend(positive_image, negative_image, self.unmask_zeros)
+        if self.canny:
+            source_image = run_canny(source_image)
+            positive_image = run_canny(positive_image)
+            negative_image = run_canny(negative_image)
+
+        mask = random_blend(positive_image, negative_image, self.unmask_zeros)
+
+        semi_image = np.where(mask[..., None], negative_image, positive_image)
+        mask = A.resize(mask.astype(float), mask.shape[0] // 4, mask.shape[1] // 4, cv2.INTER_AREA)
+        mask = mask > 0
 
         if self.val and idx < 64:
             if self.transform is not None:
@@ -275,7 +278,7 @@ class SymbolDataModule(pl.LightningDataModule):
         self.sr_set = SRDataset(self.data_dir / 'sr-test')
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return DataLoader(self.train_set, batch_size=64, shuffle=True, num_workers=16)
+        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=16)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         # return DataLoader(self.val_set, batch_size=512, num_workers=16)

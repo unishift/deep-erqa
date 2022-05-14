@@ -109,8 +109,6 @@ class EdgeMetric(pl.LightningModule):
     def base_step(self, batch, batch_idx, stage, log=True, figures=False):
         src, pos, neg, semi, mask = batch
 
-        mask = mask[:, ::4, ::4]
-
         if figures and batch_idx == 0:
             with torch.no_grad():
                 pos_res = self(src, pos, return_heatmap=True)
@@ -176,8 +174,8 @@ class EdgeMetric(pl.LightningModule):
             names.extend(name)
             heatmaps.append(heatmap)
 
-        fig, axes = plt.subplots(ncols=len(names))
-        for ax, name, heatmap in zip(axes, names, heatmaps):
+        fig, axes = plt.subplots(nrows=2, ncols=2)
+        for ax, name, heatmap in zip(axes.flatten(), names, heatmaps):
             ax.imshow(heatmap.cpu().detach(), vmin=0, vmax=1)
             ax.set_title(f'{name}: {heatmap.mean().item():.2f}')
 
