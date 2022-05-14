@@ -120,7 +120,7 @@ class EdgeMetric(pl.LightningModule):
 
         self.log(f'{stage}/PosLoss', pos_loss)
         self.log(f'{stage}/NegLoss', neg_loss)
-        self.log(f'{stage}/SemiLoss', neg_loss)
+        self.log(f'{stage}/SemiLoss', semi_loss)
         self.log(f'{stage}/Loss', loss, prog_bar=True)
 
         self.log(f'{stage}/PosValue', pos_res.mean())
