@@ -14,11 +14,13 @@ import cv2
 
 
 def run_canny(image, thr1=100, thr2=200, **kwargs):
+    image = cv2.UMat(image)
+
     image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
     image = cv2.Canny(image, 100, 200)
     image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
-    return image
+    return image.get()
 
 
 def read_image(image_path, canny=False):
