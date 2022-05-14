@@ -62,7 +62,6 @@ def main():
         model.load_state_dict(saved_model.state_dict())
         del saved_model
 
-    # trainer.tune(model, datamodule=datamodule)
     trainer.fit(model, datamodule=datamodule)
 
 

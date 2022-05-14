@@ -1,7 +1,7 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 import torch.nn.functional as F
-import matplotlib.pyplot as plt
 from matplotlib.widgets import Button, Slider
 from torchvision.transforms.functional import to_pil_image
 
@@ -43,7 +43,6 @@ def get_fold_divisor(image: torch.tensor, patch_size, stride, padding):
 
 
 def probs_fold(probs, output_size, patch_size, stride, device='cpu'):
-    # probs_repeated = probs[:, None, None].repeat(1, patch_size, patch_size, 1)
     probs = probs.view(probs.shape[0], -1, probs.shape[-1])
 
     h, w = output_size
@@ -74,13 +73,7 @@ def patch_metric(func, gt, sample, patch_size, stride=None, device='cpu'):
     probs = func(gt_blocks, sample_blocks)
     multiplier = sample_blocks.shape[-1] // probs.shape[-1]
 
-    # new_h = int(np.ceil((gt.shape[-2] - patch_size) / stride)) + 1
-    # new_w = int(np.ceil((gt.shape[-1] - patch_size) / stride)) + 1
-
-    probs = probs.view(batch_size, n_blocks, -1)  # .squeeze(0)
-
-    # probs = probs.view(batch_size, new_h, new_w)# .squeeze(0)
-    # probs = resize(probs, gt.shape[-2:])
+    probs = probs.view(batch_size, n_blocks, -1)
 
     new_shape = (gt.shape[-2] // multiplier, gt.shape[-1] // multiplier)
     probs = torch.movedim(probs, 1, -1)

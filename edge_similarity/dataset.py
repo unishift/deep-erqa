@@ -3,21 +3,21 @@ from itertools import chain
 from pathlib import Path
 from typing import Optional
 
+import albumentations as A
+import cv2
 import numpy as np
+import pytorch_lightning as pl
 import torch
+from albumentations.pytorch import ToTensorV2
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
 from torch.utils.data import Dataset, DataLoader, Subset
-import pytorch_lightning as pl
-import albumentations as A
-from albumentations.pytorch import ToTensorV2
-import cv2
 
 
 def run_canny(image, thr1=100, thr2=200, **kwargs):
-    image = cv2.UMat(image)
+    image = cv2.UMat(image)  # UMat for GPU acceleration
 
     image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-    image = cv2.Canny(image, 100, 200)
+    image = cv2.Canny(image, thr1, thr2)
     image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
 
     return image.get()
@@ -119,11 +119,11 @@ class SymbolDataset(Dataset):
         )))
 
         self.source_transform = A.Compose([
-                A.HorizontalFlip(),
-                A.VerticalFlip(),
-                A.Rotate(value=0),
-                A.RandomSizedCrop((8, 32), 64, 64),
-            ],
+            A.HorizontalFlip(),
+            A.VerticalFlip(),
+            A.Rotate(value=0),
+            A.RandomSizedCrop((8, 32), 64, 64),
+        ],
             additional_targets={
                 'image1': 'image'
             }
@@ -133,7 +133,6 @@ class SymbolDataset(Dataset):
         ])
 
         degradation_transform = [
-            # A.CoarseDropout(max_height=16, max_width=16),
             A.RandomBrightnessContrast(brightness_by_max=False),
             A.OneOf([
                 A.GaussNoise(var_limit=(10, 20)),
@@ -269,11 +268,13 @@ class SymbolDataModule(pl.LightningDataModule):
         )
         self.train_subset = Subset(SymbolDataset(
             self.data_dir / 'fannet' / 'train',
-            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros, val=True
+            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros,
+            val=True
         ), list(range(64)))
         self.val_set = SymbolDataset(
             self.data_dir / 'fannet' / 'valid',
-            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros, val=True
+            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros,
+            val=True
         )
         self.sr_set = SRDataset(self.data_dir / 'sr-test')
 
@@ -281,7 +282,6 @@ class SymbolDataModule(pl.LightningDataModule):
         return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=16)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        # return DataLoader(self.val_set, batch_size=512, num_workers=16)
         return [
             DataLoader(self.val_set, batch_size=64, num_workers=16),
             DataLoader(self.sr_set, batch_size=1, num_workers=2),

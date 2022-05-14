@@ -1,18 +1,15 @@
 import matplotlib.pyplot as plt
-import torch
-from torch import nn
-import torch.nn.functional as F
-import torchvision
 import pytorch_lightning as pl
-from effdet.efficientdet import _init_weight_alt, _init_weight
 from effdet import get_efficientdet_config
 from effdet.efficientdet import *
+from effdet.efficientdet import _init_weight_alt, _init_weight
 
 import utils
 
 
 class EdgeMetric(pl.LightningModule):
-    def __init__(self, backbone='d0', lr=0.001, agg='mean', precise_mask=False, unfreeze_backbone=False, reset_backbone=False):
+    def __init__(self, backbone='d0', lr=0.001, agg='mean', precise_mask=False, unfreeze_backbone=False,
+                 reset_backbone=False):
         super().__init__()
         self.save_hyperparameters()
 
@@ -115,28 +112,10 @@ class EdgeMetric(pl.LightningModule):
                 neg_res = self(src, neg, return_heatmap=True)
         semi_res = self(src, semi, return_heatmap=True)
 
-        # pos_mask = torch.zeros_like(mask)
-        # if self.hparams.precise_mask:
-        #     neg_mask = (torch.logical_or(neg[:, 0, ::4, ::4] != torch.amin(neg), ~neg[:, 0, ::4, ::4].eq(src[:, 0, ::4, ::4]))).type(mask.dtype).to(mask.device)
-        # else:
-        #     neg_mask = torch.ones_like(mask)
-
-        # pos_loss = self.loss_func(pos_res.squeeze(1), pos_mask)
-        # neg_loss = self.loss_func(neg_res.squeeze(1), neg_mask)
-        semi_loss = self.loss_func(semi_res.squeeze(1), mask)
-        # if self.hparams.precise_mask:
-        #     loss = (pos_loss + neg_loss + semi_loss) / 3
-        # else:
-        loss = semi_loss
+        loss = self.loss_func(semi_res.squeeze(1), mask)
 
         if log:
-            # self.log(f'{stage}/PosLoss', pos_loss)
-            # self.log(f'{stage}/NegLoss', neg_loss)
-            self.log(f'{stage}/SemiLoss', semi_loss, add_dataloader_idx=False)
             self.log(f'{stage}/Loss', loss, prog_bar=True, add_dataloader_idx=False)
-
-            # self.log(f'{stage}/PosValue', pos_res.mean())
-            # self.log(f'{stage}/NegValue', neg_res.mean())
             self.log(f'{stage}/SemiValue', semi_res.mean(), add_dataloader_idx=False)
 
         if figures and batch_idx == 0:
@@ -148,8 +127,6 @@ class EdgeMetric(pl.LightningModule):
         return self.base_step(batch, batch_idx, 'Train')
 
     def validation_step(self, batch, batch_idx, dataloader_idx):
-        # self.base_step(batch, batch_idx, 'Val')
-
         if dataloader_idx == 0:
             self.base_step(batch, batch_idx, 'Val', figures=True)
         elif dataloader_idx == 1:
