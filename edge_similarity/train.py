@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument('--logdir', default='/home/experiments/tb_logdir')
     parser.add_argument('--exp-name', default=None)
     parser.add_argument('--ckpt-path', type=Path, default=None)
+    parser.add_argument('--gpu', type=int, default=0)
 
     parser.add_argument('dataset_path', type=Path)
 
@@ -46,15 +47,13 @@ def main():
 
     datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros)
     logger = TensorBoardLogger(args.logdir, name="EdgeMetric", version=args.exp_name)
-    trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=1, auto_lr_find=True)
+    trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=[args.gpu], auto_lr_find=True)
 
     if args.ckpt_path is None:
         model = EdgeMetric(args.backbone, args.lr, agg=args.agg, precise_mask=args.precise_mask)
     else:
         model = mlflow.pytorch.load_model(args.ckpt_path)
     trainer.fit(model, datamodule=datamodule)
-
-    metrics = trainer.validate(model, datamodule=datamodule)
 
 
 if __name__ == '__main__':
