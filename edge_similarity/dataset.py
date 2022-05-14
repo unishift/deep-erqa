@@ -6,11 +6,19 @@ from typing import Optional
 import numpy as np
 import torch
 from pytorch_lightning.utilities.types import TRAIN_DATALOADERS, EVAL_DATALOADERS
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, Subset
 import pytorch_lightning as pl
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 import cv2
+
+
+def run_canny(image, thr1=100, thr2=200, **kwargs):
+    image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+    image = cv2.Canny(image, 100, 200)
+    image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+
+    return image
 
 
 def read_image(image_path, canny=False):
@@ -18,11 +26,7 @@ def read_image(image_path, canny=False):
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
     if canny:
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-
-        image = cv2.Canny(image, 100, 200)
-
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        image = run_canny(image)
 
     return image
 
@@ -97,7 +101,7 @@ class SymbolDataset(Dataset):
         path = Path(path)
         return chr(int(path.stem))
 
-    def __init__(self, root_path, transform=None, same_font=False, canny=False, unmask_zeros=False):
+    def __init__(self, root_path, transform=None, same_font=False, canny=False, unmask_zeros=False, val=False):
         self.root_path = Path(root_path)
         self.fonts = {
             font_path.name: {
@@ -129,10 +133,28 @@ class SymbolDataset(Dataset):
             A.ShiftScaleRotate(rotate_limit=5, value=0)
         ])
 
+        degradation_transform = [
+            # A.CoarseDropout(max_height=16, max_width=16),
+            A.RandomBrightnessContrast(brightness_by_max=False),
+            A.OneOf([
+                A.GaussNoise(var_limit=(10, 20)),
+                A.GaussianBlur(),
+                A.Downscale(interpolation=cv2.INTER_LINEAR),
+            ]),
+            A.Sharpen(),
+            A.ImageCompression()
+        ]
+
+        if canny:
+            degradation_transform.append(A.Lambda(image=run_canny))
+
+        self.degradation_transform = A.Compose(degradation_transform)
+
         self.transform = transform
         self.same_font = same_font
         self.canny = canny
         self.unmask_zeros = unmask_zeros
+        self.val = val
 
     def __len__(self):
         return len(self.all_images)
@@ -161,18 +183,31 @@ class SymbolDataset(Dataset):
         if self.positive_transform is not None:
             positive_image = self.positive_transform(image=positive_image)['image']
 
+        if self.degradation_transform is not None:
+            source_image = self.degradation_transform(image=source_image)['image']
+            positive_image = self.degradation_transform(image=positive_image)['image']
+            negative_image = self.degradation_transform(image=negative_image)['image']
+
         semi_image, mask = random_blend(positive_image, negative_image, self.unmask_zeros)
 
-        if self.transform is not None:
-            source_image = self.transform(image=source_image)['image']
-            positive_image = self.transform(image=positive_image)['image']
-            negative_image = self.transform(image=negative_image)['image']
-            semi_image = self.transform(image=semi_image)['image']
+        if self.val and idx < 64:
+            if self.transform is not None:
+                source_image = self.transform(image=source_image)['image']
+                positive_image = self.transform(image=positive_image)['image']
+                negative_image = self.transform(image=negative_image)['image']
+                semi_image = self.transform(image=semi_image)['image']
 
-            mask = torch.from_numpy(mask).float()
+                mask = torch.from_numpy(mask).float()
 
-        # semi_image, mask = randomly_merge(positive_image, negative_image)
-        return source_image, positive_image, negative_image, semi_image, mask
+            return source_image, positive_image, negative_image, semi_image, mask
+        else:
+            if self.transform is not None:
+                source_image = self.transform(image=source_image)['image']
+                semi_image = self.transform(image=semi_image)['image']
+
+                mask = torch.from_numpy(mask).float()
+
+            return source_image, torch.tensor(0), torch.tensor(0), semi_image, mask
 
 
 class SRDataset(Dataset):
@@ -195,14 +230,8 @@ class SRDataset(Dataset):
         image = read_image(image_path)
         gt = read_image(self.gt)
 
-        image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        gt = cv2.cvtColor(gt, cv2.COLOR_RGB2GRAY)
-
-        image = cv2.Canny(image, 100, 200)
-        gt = cv2.Canny(gt, 100, 200)
-
-        image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
-        gt = cv2.cvtColor(gt, cv2.COLOR_GRAY2RGB)
+        image = run_canny(image)
+        gt = run_canny(gt)
 
         image = self.transform(image=image)['image']
         gt = self.transform(image=gt)['image']
@@ -215,19 +244,15 @@ class SymbolDataModule(pl.LightningDataModule):
         super().__init__()
 
         self.data_dir = Path(data_dir)
-        self.transform = A.Compose([
-            # A.CoarseDropout(max_height=16, max_width=16),
-            A.RandomBrightnessContrast(brightness_by_max=False),
-            A.OneOf([
-                A.GaussNoise(var_limit=(10, 20)),
-                A.GaussianBlur(),
-                A.Downscale(interpolation=cv2.INTER_LINEAR),
-            ]),
-            A.Sharpen(),
-            A.ImageCompression(),
+
+        transforms = []
+
+        transforms.extend([
             A.Normalize(),
             ToTensorV2()
         ])
+
+        self.transform = A.Compose(transforms)
         self.same_font = same_font
         self.canny = canny
         self.unmask_zeros = unmask_zeros
@@ -237,18 +262,23 @@ class SymbolDataModule(pl.LightningDataModule):
             self.data_dir / 'fannet' / 'train',
             transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros
         )
+        self.train_subset = Subset(SymbolDataset(
+            self.data_dir / 'fannet' / 'train',
+            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros, val=True
+        ), list(range(64)))
         self.val_set = SymbolDataset(
             self.data_dir / 'fannet' / 'valid',
-            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros
+            transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros, val=True
         )
         self.sr_set = SRDataset(self.data_dir / 'sr-test')
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=16)
+        return DataLoader(self.train_set, batch_size=64, shuffle=True, num_workers=16)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
-        return DataLoader(self.val_set, batch_size=256, num_workers=16)
-        # return [
-        #     DataLoader(self.val_set, batch_size=256, num_workers=8),
-        #     DataLoader(self.sr_set, batch_size=1, num_workers=2)
-        # ]
+        # return DataLoader(self.val_set, batch_size=512, num_workers=16)
+        return [
+            DataLoader(self.val_set, batch_size=64, num_workers=16),
+            DataLoader(self.sr_set, batch_size=1, num_workers=2),
+            DataLoader(self.train_subset, batch_size=64, num_workers=16, shuffle=True)
+        ]

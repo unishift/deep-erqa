@@ -20,6 +20,8 @@ def parse_args():
     parser.add_argument('--canny', action='store_true')
     parser.add_argument('--unmask-zeros', action='store_true')
     parser.add_argument('--precise-mask', action='store_true')
+    parser.add_argument('--unfreeze-backbone', action='store_true')
+    parser.add_argument('--reset-backbone', action='store_true')
 
     parser.add_argument('--logdir', default='/home/experiments/tb_logdir')
     parser.add_argument('--exp-name', default=None)
@@ -42,17 +44,25 @@ def main():
         'agg': args.agg,
         'canny': args.canny,
         'unmask_zeros': args.unmask_zeros,
-        'precise_mask': args.precise_mask
+        'precise_mask': args.precise_mask,
+        'unfreeze_backbone': args.unfreeze_backbone,
+        'reset_backbone': args.reset_backbone,
     })
 
     datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros)
     logger = TensorBoardLogger(args.logdir, name="EdgeMetric", version=args.exp_name)
-    trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=[args.gpu], auto_lr_find=True)
+    trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=[args.gpu])
 
-    if args.ckpt_path is None:
-        model = EdgeMetric(args.backbone, args.lr, agg=args.agg, precise_mask=args.precise_mask)
-    else:
-        model = mlflow.pytorch.load_model(args.ckpt_path)
+    model = EdgeMetric(
+        args.backbone, args.lr, agg=args.agg, precise_mask=args.precise_mask,
+        unfreeze_backbone=args.unfreeze_backbone, reset_backbone=args.reset_backbone
+    )
+    if args.ckpt_path is not None:
+        saved_model = mlflow.pytorch.load_model(args.ckpt_path)
+        model.load_state_dict(saved_model.state_dict())
+        del saved_model
+
+    # trainer.tune(model, datamodule=datamodule)
     trainer.fit(model, datamodule=datamodule)
 
 
