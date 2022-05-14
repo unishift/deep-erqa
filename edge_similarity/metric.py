@@ -10,7 +10,7 @@ from effdet.efficientdet import *
 
 
 class EdgeMetric(pl.LightningModule):
-    def __init__(self, backbone='d0', lr=0.001, agg='mean'):
+    def __init__(self, backbone='d0', lr=0.001, agg='mean', precise_mask=False):
         super().__init__()
         self.save_hyperparameters()
 
@@ -112,11 +112,19 @@ class EdgeMetric(pl.LightningModule):
         neg_res = self(src, neg, return_heatmap=True)
         semi_res = self(src, semi, return_heatmap=True)
 
-        pos_loss = self.loss_func(pos_res.squeeze(1), torch.zeros_like(mask))
-        neg_loss = self.loss_func(neg_res.squeeze(1), torch.ones_like(mask))
+        pos_mask = torch.zeros_like(mask)
+        if self.hparams.precise_mask:
+            neg_mask = (neg[:, :1] != 0).type(mask.dtype).to(mask.device)
+        else:
+            neg_mask = torch.ones_like(mask)
+
+        pos_loss = self.loss_func(pos_res.squeeze(1), pos_mask)
+        neg_loss = self.loss_func(neg_res.squeeze(1), neg_mask)
         semi_loss = self.loss_func(semi_res.squeeze(1), mask)
-        # loss = (pos_loss + neg_loss + semi_loss) / 3
-        loss = semi_loss
+        if self.hparams.precise_mask:
+            loss = (pos_loss + neg_loss + semi_loss) / 3
+        else:
+            loss = semi_loss
 
         self.log(f'{stage}/PosLoss', pos_loss)
         self.log(f'{stage}/NegLoss', neg_loss)

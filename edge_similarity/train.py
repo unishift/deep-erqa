@@ -19,6 +19,7 @@ def parse_args():
     parser.add_argument('--agg', choices=('max', 'mean'), default='max')
     parser.add_argument('--canny', action='store_true')
     parser.add_argument('--unmask-zeros', action='store_true')
+    parser.add_argument('--precise-mask', action='store_true')
 
     parser.add_argument('--logdir', default='/home/experiments/tb_logdir')
     parser.add_argument('--exp-name', default=None)
@@ -39,7 +40,8 @@ def main():
         'backbone': args.backbone,
         'agg': args.agg,
         'canny': args.canny,
-        'unmask_zeros': args.unmask_zeros
+        'unmask_zeros': args.unmask_zeros,
+        'precise_mask': args.precise_mask
     })
 
     datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros)
@@ -47,7 +49,7 @@ def main():
     trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=1, auto_lr_find=True)
 
     if args.ckpt_path is None:
-        model = EdgeMetric(args.backbone, args.lr, agg=args.agg)
+        model = EdgeMetric(args.backbone, args.lr, agg=args.agg, precise_mask=args.precise_mask)
     else:
         model = mlflow.pytorch.load_model(args.ckpt_path)
     trainer.fit(model, datamodule=datamodule)
