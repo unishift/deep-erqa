@@ -140,3 +140,19 @@ class HeatmapState:
             self.gt_bar.set(alpha=1)
             self.sample_bar.set(alpha=0)
         plt.draw()
+
+
+def save_image(data, fn, **kwargs):
+    sizes = np.shape(data)
+    height = float(sizes[0])
+    width = float(sizes[1])
+
+    fig = plt.figure()
+    fig.set_size_inches(width / height, 1, forward=False)
+    ax = plt.Axes(fig, [0., 0., 1., 1.])
+    ax.set_axis_off()
+    fig.add_axes(ax)
+
+    ax.imshow(data, **kwargs)
+    plt.savefig(fn, dpi=height)
+    plt.close()

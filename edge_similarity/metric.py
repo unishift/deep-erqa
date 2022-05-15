@@ -158,3 +158,13 @@ class EdgeMetric(pl.LightningModule):
 
         plt.tight_layout()
         self.logger.experiment.add_figure(f'Val/SR_res', fig, self.current_epoch)
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        ref, tgt = batch
+
+        def _run(gt, image):
+            return self(gt, image, True)
+
+        pred = utils.patch_metric(_run, ref, tgt, self.config.image_size[0], device=self.device)
+
+        return self.aggregate(pred), pred

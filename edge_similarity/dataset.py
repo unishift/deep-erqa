@@ -287,3 +287,31 @@ class SymbolDataModule(pl.LightningDataModule):
             DataLoader(self.sr_set, batch_size=1, num_workers=2),
             DataLoader(self.train_subset, batch_size=64, num_workers=16, shuffle=True)
         ]
+
+
+class VSRbenchmark(Dataset):
+    def __init__(self, root_path):
+        self.root_path = Path(root_path)
+        self.gt = sorted(self.root_path.joinpath('GT').glob('*.PNG'))
+        self.frames = sorted(self.root_path.glob('*/*.PNG'))
+
+        self.transform = A.Compose([
+            A.Normalize(),
+            ToTensorV2()
+        ])
+
+    def __len__(self):
+        return len(self.frames)
+
+    def __getitem__(self, idx):
+        frame = self.frames[idx]
+        frame_idx = int(frame.stem[len('frame_'):]) - 1
+        gt = self.gt[frame_idx]
+
+        frame = read_image(frame, canny=True)
+        gt = read_image(gt, canny=True)
+
+        frame = self.transform(image=frame)['image']
+        gt = self.transform(image=gt)['image']
+
+        return gt, frame
