@@ -5,6 +5,7 @@ import mlflow
 import mlflow.pytorch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning.callbacks import BackboneFinetuning
 
 from dataset import SymbolDataModule
 from metric import EdgeMetric
@@ -37,7 +38,7 @@ def main():
     args = parse_args()
 
     mlflow.set_tracking_uri("http://localhost:5000")
-    mlflow.pytorch.autolog()
+    mlflow.pytorch.autolog(registered_model_name=args.exp_name)
 
     mlflow.log_params({
         'backbone': args.backbone,
@@ -51,6 +52,7 @@ def main():
 
     datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros)
     logger = TensorBoardLogger(args.logdir, name="EdgeMetric", version=args.exp_name)
+    finetuner = BackboneFinetuning(args.epochs // 2, lambda epoch: 1., backbone_initial_lr=args.lr)
     trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=[args.gpu])
 
     model = EdgeMetric(

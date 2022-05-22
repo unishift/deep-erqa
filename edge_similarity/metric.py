@@ -3,6 +3,7 @@ import pytorch_lightning as pl
 from effdet import get_efficientdet_config
 from effdet.efficientdet import *
 from effdet.efficientdet import _init_weight_alt, _init_weight
+from scipy.stats import pearsonr, spearmanr
 
 import utils
 
@@ -93,13 +94,15 @@ class EdgeMetric(pl.LightningModule):
             ax[7].imshow(mask[i].cpu().detach(), vmin=0, vmax=1)
 
         axes[0][0].set_title('Source')
-        axes[0][1].set_title('Positive')
-        axes[0][2].set_title('Pos Heatmap')
-        axes[0][3].set_title('Negative')
-        axes[0][4].set_title('Neg Heatmap')
+        axes[0][1].set_title('Pos')
+        axes[0][2].set_title('PosMap')
+        axes[0][3].set_title('Neg')
+        axes[0][4].set_title('NegMap')
         axes[0][5].set_title('Semi')
-        axes[0][6].set_title('Semi Heatmap')
+        axes[0][6].set_title('SemiMap')
         axes[0][7].set_title('Mask')
+
+        plt.tight_layout()
 
         self.logger.experiment.add_figure(tag, fig, self.current_epoch)
 
@@ -130,14 +133,14 @@ class EdgeMetric(pl.LightningModule):
         if dataloader_idx == 0:
             self.base_step(batch, batch_idx, 'Val', figures=True)
         elif dataloader_idx == 1:
-            name, ref, tgt = batch
+            name, ref, tgt, subj = batch
 
             def _run(gt, image):
                 return self(gt, image, True)
 
             res = utils.patch_metric(_run, ref, tgt, self.config.image_size[0], device=self.device)
 
-            return name, res
+            return name, res, subj
         elif dataloader_idx == 2:
             self.base_step(batch, batch_idx, 'Train', log=False, figures=True)
 
@@ -146,11 +149,14 @@ class EdgeMetric(pl.LightningModule):
 
         names = []
         heatmaps = []
+        subjectives = []
 
-        for name, heatmap in outputs:
+        for name, heatmap, subjective in outputs:
             names.extend(name)
             heatmaps.append(heatmap)
+            subjectives.append(subjective.item())
 
+        # Plot vis
         fig, axes = plt.subplots(nrows=2, ncols=2)
         for ax, name, heatmap in zip(axes.flatten(), names, heatmaps):
             ax.imshow(heatmap.cpu().detach(), vmin=0, vmax=1)
@@ -158,6 +164,14 @@ class EdgeMetric(pl.LightningModule):
 
         plt.tight_layout()
         self.logger.experiment.add_figure(f'Val/SR_res', fig, self.current_epoch)
+
+        # Calculate correlation
+        scores = self.aggregate(torch.stack(heatmaps)).tolist()
+        pearson = pearsonr(subjectives, scores)[0]
+        spearman = spearmanr(subjectives, scores)[0]
+
+        self.log('Val/SR_pearson', pearson, add_dataloader_idx=False)
+        self.log('Val/SR_spearman', spearman, add_dataloader_idx=False)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         ref, tgt = batch

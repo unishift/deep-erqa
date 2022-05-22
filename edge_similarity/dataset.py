@@ -157,17 +157,17 @@ class SymbolDataset(Dataset):
     def __getitem__(self, idx):
         source_image_path = self.all_images[idx]
 
-        source_image = read_image(source_image_path, canny=self.canny)
+        source_image = read_image(source_image_path)
         source_ch = self.char_from_path(source_image_path)
 
         if self.same_font:
             same_sym = self.symbols[source_ch]
-            positive_image = read_image(random.choice(same_sym), canny=self.canny)
+            positive_image = read_image(random.choice(same_sym))
         else:
             positive_image = source_image
 
         diff_sym = list(chain(*(self.symbols[ch] for ch in self.SYMBOLS if ch != source_ch)))
-        negative_image = read_image(random.choice(diff_sym), canny=self.canny)
+        negative_image = read_image(random.choice(diff_sym))
 
         if self.source_transform is not None:
             transform_res = self.source_transform(image=source_image, image1=positive_image)
@@ -214,11 +214,31 @@ class SymbolDataset(Dataset):
             return source_image, torch.tensor(0), torch.tensor(0), semi_image, mask
 
 
-class SRDataset(Dataset):
-    def __init__(self, root_path):
+class VSRbenchmark(Dataset):
+    def __init__(self, root_path, choose_frame=None, train_mode=False):
+        self.choose_frame = choose_frame
+        self.train_mode = train_mode
+
         self.root_path = Path(root_path)
-        self.images = list(self.root_path.glob('*.png'))
-        self.gt = self.root_path / 'GT.png'
+        self.images_path = self.root_path / 'imgs'
+        if choose_frame is None:
+            self.frames = sorted(self.images_path.glob('*/*.PNG'))
+            self.gt = sorted(self.images_path.joinpath('GT').glob('*.PNG'))
+        else:
+            self.frames = sorted(self.images_path.glob('*.png'))
+            self.gt = self.images_path.joinpath('GT.png')
+
+        self.subjective_path = self.root_path / 'subjectify_all.csv'
+        self.subjective = {}
+        with open(self.subjective_path, 'r') as f:
+            for idx, line in enumerate(f.readlines()):
+                if idx == 0:
+                    continue
+
+                name, score = line.strip().split(';')
+                name = name.replace('"', '')
+                score = float(score.replace(',', '.'))
+                self.subjective[name] = score
 
         self.transform = A.Compose([
             A.Normalize(),
@@ -226,21 +246,29 @@ class SRDataset(Dataset):
         ])
 
     def __len__(self):
-        return len(self.images)
+        return len(self.frames)
 
     def __getitem__(self, idx):
-        image_path = self.images[idx]
+        frame = self.frames[idx]
+        if self.choose_frame is None:
+            name = frame.parent.stem
+            frame_idx = int(frame.stem[len('frame_'):]) - 1
+            gt = self.gt[frame_idx]
+        else:
+            name = frame.stem
+            gt = self.gt
 
-        image = read_image(image_path)
-        gt = read_image(self.gt)
+        frame = read_image(frame, canny=True)
+        gt = read_image(gt, canny=True)
 
-        image = run_canny(image)
-        gt = run_canny(gt)
-
-        image = self.transform(image=image)['image']
+        frame = self.transform(image=frame)['image']
         gt = self.transform(image=gt)['image']
 
-        return image_path.stem, gt, image
+        if self.train_mode:
+            subjective = self.subjective[name]
+            return name, gt, frame, subjective
+        else:
+            return gt, frame
 
 
 class SymbolDataModule(pl.LightningDataModule):
@@ -276,7 +304,7 @@ class SymbolDataModule(pl.LightningDataModule):
             transform=self.transform, same_font=self.same_font, canny=self.canny, unmask_zeros=self.unmask_zeros,
             val=True
         )
-        self.sr_set = SRDataset(self.data_dir / 'sr-test')
+        self.sr_set = VSRbenchmark(self.data_dir / 'sr-test', choose_frame=50, train_mode=True)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
         return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=16)
@@ -289,29 +317,3 @@ class SymbolDataModule(pl.LightningDataModule):
         ]
 
 
-class VSRbenchmark(Dataset):
-    def __init__(self, root_path):
-        self.root_path = Path(root_path)
-        self.gt = sorted(self.root_path.joinpath('GT').glob('*.PNG'))
-        self.frames = sorted(self.root_path.glob('*/*.PNG'))
-
-        self.transform = A.Compose([
-            A.Normalize(),
-            ToTensorV2()
-        ])
-
-    def __len__(self):
-        return len(self.frames)
-
-    def __getitem__(self, idx):
-        frame = self.frames[idx]
-        frame_idx = int(frame.stem[len('frame_'):]) - 1
-        gt = self.gt[frame_idx]
-
-        frame = read_image(frame, canny=True)
-        gt = read_image(gt, canny=True)
-
-        frame = self.transform(image=frame)['image']
-        gt = self.transform(image=gt)['image']
-
-        return gt, frame
