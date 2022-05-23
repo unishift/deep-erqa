@@ -28,6 +28,7 @@ def parse_args():
     parser.add_argument('--exp-name', default=None)
     parser.add_argument('--ckpt-path', type=Path, default=None)
     parser.add_argument('--gpu', type=int, default=0)
+    parser.add_argument('--workers', type=int, default=8, help='Number of workers per dataloader')
 
     parser.add_argument('dataset_path', type=Path)
 
@@ -50,7 +51,7 @@ def main():
         'reset_backbone': args.reset_backbone,
     })
 
-    datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros)
+    datamodule = SymbolDataModule(args.dataset_path, canny=args.canny, unmask_zeros=args.unmask_zeros, workers=args.workers)
     logger = TensorBoardLogger(args.logdir, name="EdgeMetric", version=args.exp_name)
     finetuner = BackboneFinetuning(args.epochs // 2, lambda epoch: 1., backbone_initial_lr=args.lr)
     trainer = pl.Trainer(logger=logger, max_epochs=args.epochs, gpus=[args.gpu])

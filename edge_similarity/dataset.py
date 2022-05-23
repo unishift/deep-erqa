@@ -272,7 +272,7 @@ class VSRbenchmark(Dataset):
 
 
 class SymbolDataModule(pl.LightningDataModule):
-    def __init__(self, data_dir, same_font=False, canny=False, unmask_zeros=False):
+    def __init__(self, data_dir, same_font=False, canny=False, unmask_zeros=False, workers=8):
         super().__init__()
 
         self.data_dir = Path(data_dir)
@@ -288,6 +288,8 @@ class SymbolDataModule(pl.LightningDataModule):
         self.same_font = same_font
         self.canny = canny
         self.unmask_zeros = unmask_zeros
+
+        self.workers = workers
 
     def setup(self, stage: Optional[str] = None):
         self.train_set = SymbolDataset(
@@ -307,13 +309,13 @@ class SymbolDataModule(pl.LightningDataModule):
         self.sr_set = VSRbenchmark(self.data_dir / 'sr-test', choose_frame=50, train_mode=True)
 
     def train_dataloader(self) -> TRAIN_DATALOADERS:
-        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=16)
+        return DataLoader(self.train_set, batch_size=256, shuffle=True, num_workers=self.workers)
 
     def val_dataloader(self) -> EVAL_DATALOADERS:
         return [
-            DataLoader(self.val_set, batch_size=64, num_workers=16),
-            DataLoader(self.sr_set, batch_size=1, num_workers=2),
-            DataLoader(self.train_subset, batch_size=64, num_workers=16, shuffle=True)
+            DataLoader(self.val_set, batch_size=64, num_workers=self.workers),
+            DataLoader(self.sr_set, batch_size=1, num_workers=self.workers),
+            DataLoader(self.train_subset, batch_size=64, num_workers=self.workers, shuffle=True)
         ]
 
 
