@@ -1,14 +1,22 @@
 # Deep ERQA
 
-Нейросетевая метрика качества восстановления границ
+NN-based Full-Reference metric for assessing image restoration quality.
 
-## Пример использования
+## Usage example
 
-1. Берем веса с Calypso: `//calypso/work/22e_lya/deep-erqa/weights/best_model.zip`
-2. Разжимаем zip
-3. Модифицируем `edge_similarity/test_benchmark.py` под свои нужды и запускаем. Текущий код для `${VSR_PATH}/test1_bicubic/full_result/`
+0. Install requirements `pip install -r requirements.txt`
+1. Download weights: https://drive.google.com/file/d/11oo-EoJN5yVQ30m0PwBA4qgqpY3NBg3m/view?usp=sharing
+2. Unzip downloaded file
+3. Modify `edge_similarity/test_benchmark.py` for your needs and execute.
 ```
 python edge_similarity/test_benchmark.py --gpu 0 ${MODEL_PATH}/best_model/model ${DATA_PATH} ${RES_PATH}
 ```
 
-TODO: Сделать более унифицированный запуск
+## Train example
+
+0. Install requirements `pip install -r requirements.txt`
+1. Download `fannet.zip` from [this link](https://drive.google.com/drive/folders/1dOl4_yk2x-LTHwgKBykxHQpmqDvqlkab) and unzip to `${DATA_PATH}`
+2. Run the following command
+```
+python edge_similarity/train.py --gpu 0 ${DATA_PATH}
+```
